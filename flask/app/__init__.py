@@ -4,12 +4,17 @@ from flask_restx import Api
 # Import error handling for MongoDB
 from pymongo.errors import ServerSelectionTimeoutError
 from .extensions import mongo
+from dotenv import load_dotenv
+import os
+
+# Load environment variables from .env file
+load_dotenv()
 
 
 def create_app():
     app = Flask(__name__)
     CORS(app)
-    app.config["MONGO_URI"] = "mongodb+srv://mehul213amb:mongoosemehulgoose@cluster0.emrth.mongodb.net/overlays?retryWrites=true&w=majority&appName=Cluster0"
+    app.config["MONGO_URI"] = os.getenv("MONGO_URI")
 
     mongo.init_app(app)
 
