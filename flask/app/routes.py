@@ -1,12 +1,16 @@
 from werkzeug.utils import secure_filename
 import os
+from dotenv import load_dotenv
 from flask import Blueprint, send_from_directory, send_file, jsonify, request, current_app
 import subprocess
 from flask_restx import Namespace, Resource, fields
 from .extensions import mongo
 import logging
 import json
-output_path = '/home/mehul/Documents/rtsp/'
+
+load_dotenv()
+output_path = os.getenv("STREAMING_DIR")
+data_dir = os.getenv("DATA")
 
 # Define the API namespace
 main = Namespace('overlays', description='Overlay related operations')
@@ -87,7 +91,7 @@ class OverlayList(Resource):
                 # Check if image is modified or needs to be handled
                 if image_file and allowed_file(image_file.filename):
                     filename = secure_filename(image_file.filename)
-                    filepath = os.path.join("/home/mehul/Videos/", filename)
+                    filepath = os.path.join(data_dir, filename)
                     image_file.save(filepath)
                     overlay['content'] = filepath
                     if overlay['content'] != existing_overlay.get('content'):
@@ -110,7 +114,7 @@ class OverlayList(Resource):
                 # Handle image upload for new overlays
                 if image_file and allowed_file(image_file.filename):
                     filename = secure_filename(image_file.filename)
-                    filepath = os.path.join("/home/mehul/Videos", filename)
+                    filepath = os.path.join(data_dir, filename)
                     image_file.save(filepath)
                     overlay['content'] = filepath
 
@@ -186,7 +190,6 @@ class StartStream(Resource):
             return jsonify({'error': 'RTSP URL REQUIRED'}), 400
 
         fileName = "output.m3u8"
-        output_path = '/home/mehul/Documents/rtsp/'
         # Run ffmpeg to start the stream
         ffmpeg_command = f'ffmpeg -i {
             rtsp_url} -c:v copy -hls_time 2 -hls_list_size 5 -f hls {output_path+fileName}'
@@ -202,7 +205,6 @@ class Stream(Resource):
     @main.doc('get_stream')
     def get(self, filename):
         """Serve HLS stream files"""
-        output_path = '/home/mehul/Documents/rtsp/'
         return send_from_directory(output_path, filename)
 
 
