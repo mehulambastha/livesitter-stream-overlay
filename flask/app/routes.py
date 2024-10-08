@@ -1,13 +1,23 @@
+from werkzeug.utils import secure_filename
+import os
 from flask import Blueprint, send_from_directory, send_file, jsonify, request, current_app
 import subprocess
 from flask_restx import Namespace, Resource, fields
-import uuid
 from .extensions import mongo
 import logging
+import json
 output_path = '/home/mehul/Documents/rtsp/'
 
 # Define the API namespace
 main = Namespace('overlays', description='Overlay related operations')
+
+
+def allowed_file(filename):
+    # Define a set of allowed file extensions
+    allowed_extensions = {'png', 'jpg', 'jpeg', 'gif'}
+    # Check if the filename has an extension and if it's in the allowed list
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in allowed_extensions
+
 
 # Define the data model for Swagger documentation
 overlay_parameters_model = main.model('OverlayParameters', {
@@ -19,12 +29,16 @@ overlay_parameters_model = main.model('OverlayParameters', {
 })
 
 overlay_model = main.model('Overlay', {
-    'id': fields.String(description='UUID of the overlay'),
+    'uuid': fields.String(required=True, description='UUID of the overlay'),
     'type': fields.String(required=True, description='Type of the overlay'),
     'name': fields.String(required=True, description='Name of the overlay'),
-    'content': fields.String(required=True, description='Content of the overlay'),
+    'imageSrc': fields.String(required=False, description='URL of the image for preview in frontend'),
+    # Use Raw for file data
+    'imageFile': fields.Raw(required=False, description='Actual image file to be uploaded'),
+    'content': fields.String(required=False, description='Content of the overlay (if applicable)'),
     'parameters': fields.Nested(overlay_parameters_model, description='Parameters of the overlay'),
 })
+
 
 # Collection
 
@@ -47,35 +61,69 @@ class OverlayList(Resource):
     @main.doc('create_overlay')
     @main.expect([overlay_model])  # Expect a list of overlays
     def post(self):
-        """Create new overlays (bulk creation)"""
+        """Create or update overlays (bulk creation or update)"""
         overlays_collection = current_app.mongo.db.overlays
-        data = request.json  # This is a list of overlays
+        data = request.form.getlist('overlays')
+        files = request.files.getlist('imageFiles')
 
         if not isinstance(data, list):
             return {"error": "Data should be a list of overlays"}, 400
 
         inserted_ids = []
+        modified_ids = []
 
-        for overlay in data:
+        for i, overlay_str in enumerate(data):
+            overlay = json.loads(overlay_str)
+            # Get corresponding image file if exists
+            image_file = files[i] if i < len(files) else None
             existing_overlay = overlays_collection.find_one(
-                {"id": overlay["id"]})
+                {"uuid": overlay['uuid']})
 
+            # Check if overlay already exists
             if existing_overlay:
-                # Compare existing overlay with the incoming one
-                if existing_overlay != overlay:
-                    # Update the existing overlay if there are changes
+                # Compare incoming data with existing data to check for modifications
+                modified = False
+
+                # Check if image is modified or needs to be handled
+                if image_file and allowed_file(image_file.filename):
+                    filename = secure_filename(image_file.filename)
+                    filepath = os.path.join("/home/mehul/Videos/", filename)
+                    image_file.save(filepath)
+                    overlay['content'] = filepath
+                    if overlay['content'] != existing_overlay.get('content'):
+                        modified = True  # Image has been changed
+
+            # Compare other fields for modification
+                for key in overlay:
+                    if overlay[key] != existing_overlay.get(key):
+                        modified = True
+
+                if modified:
+                    # Update the existing overlay if modified
                     overlays_collection.update_one(
-                        {"id": overlay["id"]}, {"$set": overlay})
+                        {"uuid": overlay['uuid']},
+                        {"$set": overlay}
+                    )
+                    modified_ids.append(overlay['uuid'])
+
             else:
-                # Generate a new UUID for the overlay if it doesn't exist
-                overlay['id'] = str(uuid.uuid4())
-                overlays_collection.insert_one(overlay)  # Insert new overlay
-                # Keep track of inserted IDs
-                inserted_ids.append(overlay['id'])
+                # Handle image upload for new overlays
+                if image_file and allowed_file(image_file.filename):
+                    filename = secure_filename(image_file.filename)
+                    filepath = os.path.join("/home/mehul/Videos", filename)
+                    image_file.save(filepath)
+                    overlay['content'] = filepath
 
-        return {"inserted_ids": inserted_ids}, 201
+                # Insert the new overlay if it doesn't exist
+                result = overlays_collection.insert_one(overlay)
+                inserted_ids.append(str(result.inserted_id))
 
-# PUT - update an overlay
+        return {
+            "inserted_ids": inserted_ids,
+            "modified_ids": modified_ids
+        }, 201
+
+# PUT - :update an overlay
 
 
 @main.route('/overlays/<string:overlay_id>')
@@ -113,7 +161,7 @@ class Overlay(Resource):
         overlays_collection = current_app.mongo.db.overlays
 
         # Find and delete the overlay by ID
-        result = overlays_collection.delete_one({"id": overlay_id})
+        result = overlays_collection.delete_one({"uuid": overlay_id})
         if result.deleted_count == 1:
             return {"message": f"Overlay {overlay_id} deleted successfully."}, 200
         else:
@@ -144,7 +192,7 @@ class StartStream(Resource):
             rtsp_url} -c:v copy -hls_time 2 -hls_list_size 5 -f hls {output_path+fileName}'
         subprocess.Popen(ffmpeg_command, shell=True)
 
-        return jsonify({'message': 'Stream Started', 'hls_url': '/api/stream/output.m3u8'}), 200
+        return {'message': 'Stream Started', 'hls_url': '/api/stream/output.m3u8'}, 200
 
 
 # GET /api/stream/<filename> route
@@ -164,4 +212,4 @@ class GetData(Resource):
     @main.doc('get_data')
     def get(self):
         """Get API response"""
-        return jsonify({'message': 'API Response'}), 200
+        return {'message': 'API Response'}, 200

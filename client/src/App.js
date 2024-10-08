@@ -40,16 +40,11 @@ function App() {
     }
   }, [fetchOverlays])
 
-
-  useEffect(() => {
-    console.log('The state is: ', overLays);
-  }, [overLays]); // This effect runs whenever overLays changes
-  // Add a new text overlay
   const addTextOverlay = () => {
     setOverlays(prev => [
       ...prev,
       {
-        id: uuidv4(),
+        uuid: uuidv4(),
         type: "TEXT",
         name: "text_overlay",
         content: "",
@@ -86,10 +81,11 @@ function App() {
         setOverlays(prev => [
           ...prev,
           {
-            id: uuidv4(),
+            uuid: uuidv4(),
             type: "IMAGE",
             name: "image_overlay",
-            imageSrc: imageUrl, // Image URL after upload
+            imageSrc: imageUrl, // For preview in frontend
+            imageFile: imageFile, // Store the actual file to send to the backend
             parameters: {
               width,
               height,
@@ -103,22 +99,24 @@ function App() {
     reader.readAsDataURL(imageFile);
   };
 
-  // Handle save (dummy API call)
   const saveChanges = () => {
-    console.log("Modified overlays sent to backend:", modifiedOverlays);
+    const formData = new FormData();
+    overLays.forEach((overlay) => {
+      formData.append('overlays', JSON.stringify(overlay)); // Attach overlay details
+      if (overlay.imageFile) {
+        formData.append('imageFiles', overlay.imageFile);  // Attach image file
+      }
+    });
+
+
     // Dummy POST API call
     fetch("http://localhost:5000/api/overlays", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(overLays) // Send only the modified overlays
+      body: formData // Send only the modified overlays
     })
       .then(response => response.json())
       .then(data => {
         console.log("Save response:", data);
-        // Clear modifiedOverlays after save
-        setModifiedOverlays([]);
       })
       .finally(() => setFetchOverlays(true))
       .catch(error => {
@@ -127,21 +125,28 @@ function App() {
   };
 
   const streamVideo = () => {
-    setStreamUrl(inputurl)
-    setPlayinh(true)
-  }
-
-  const getFontSize = (overlay) => {
-    const baseFontSize = 14;  // Default font size when the box is at reference width
-    const referenceWidth = 100;  // Default/initial width of the box
-    const scaleFactor = overlay.parameters.width / referenceWidth;  // Scale factor based on current width
-
-    // Ensure the font doesn't scale down too much by setting a minimum font size
-    return Math.max(baseFontSize * scaleFactor, 10);  // 10px minimum font size
+    fetch('http://localhost:5000/api/start-stream', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        "rtsp_url": inputurl
+      })
+    })
+      .then(response => response.json())
+      .then(data => {
+        setStreamUrl(`http://localhost:5000${data.hls_url}`)
+        setPlayinh(true)
+      })
+      .catch(error => {
+        alert('Cant play the stream. Check console logs')
+        console.log(error)
+      })
   }
 
   const handleUrlInput = (e) => {
-    setStreamUrl(e.target.value)
+    setInputUrl(e.target.value)
   }
 
   const handleDelete = (overlay_id) => {
@@ -151,7 +156,7 @@ function App() {
         "Content-Type": "application/json",
       },
     })
-      .then(() => setOverlays(overLays.filter(o => o.id != overlay_id)))
+      .then(() => setOverlays(overLays.filter(o => o.uuid != overlay_id)))
       .then(() => setFetchOverlays(false))
       .catch((error) => console.log('Error: ', error))
   }
@@ -174,141 +179,170 @@ function App() {
           </div>
         </section>
       </header>
-      <div className='flex flex-col gap-2'>
-        <div className='h-[500px] w-full bg-gray-500 min-w-[200px] border-2 border-blue-500'>
-          <ReactPlayer
-            url={steamUrl}
-            playing={playing}    // Play/pause control
-            volume={volume}      // Volume control
-            width="100%"         // Video width
-            height="500px"
-          />
-          {overLays.map((overlay) => (
-            <Rnd
-              key={overlay.id}
-              bounds="parent"
-              size={{ width: overlay.parameters.width, height: overlay.parameters.height }}
-              position={{ x: overlay.parameters.x, y: overlay.parameters.y }}
-              onDragStop={(e, d) => setOverlays(prev => prev.map(o => o.id === overlay.id ? { ...o, parameters: { ...o.parameters, x: d.x, y: d.y } } : o))}
-              onResizeStop={(e, direction, ref, delta, position) =>
-                setOverlays(prev => prev.map(o => o.id === overlay.id ? { ...o, parameters: { ...o.parameters, width: ref.style.width.replace('px', ''), height: ref.style.height.replace('px', '') } } : o))}
-            >
-              {overlay.type === "TEXT" ? (
-                <div
-                  tabIndex={0}
-                  onFocus={() => setFocussedParentId(overlay.id)}
-                  onBlur={() => setFocussedParentId(null)}
-                  style={{ position: "relative", width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <p
-                    className="text-white border border-white"
-                    style={{
-                      fontSize: `${(overlay.parameters.width / 100) * 14}px`,
-                      width: "100%",
-                      height: "100%",
-                      margin: 0,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      position: "relative",
-                    }}
-                  >
-                    <input
-                      value={overLays.find((x) => x.id === overlay.id).content}
-                      onChange={(e) =>
-                        setOverlays((prev) =>
-                          prev.map((o) => (o.id === overlay.id ? { ...o, content: e.target.value } : o))
-                        )
-                      }
-                      className="absolute inset-0 w-full h-full bg-transparent text-transparent focus:outline-none focus:ring-0"
-                    />
-                    {overlay.content}
-                  </p>
-                  {
-                    focussedParentId === overlay.id && <CiTrash onClick={(e) => {
-                      e.stopPropagation()
-                      handleDelete(overlay.id)
-                    }} className='text-2xl absolute -top-5 -right-5' />
-                  }
-                </div>
-              ) : (
-                <div
-                  tabIndex={0}
-                  onFocus={() => setFocussedParentId(overlay.id)}
-                  onBlur={() => setFocussedParentId(null)}
-                >
-                  <img
+      {
+        steamUrl &&
+        <div className='flex flex-col gap-2'>
+          <div className='h-[500px] w-full bg-gray-500 min-w-[200px]'>
 
-                    src={overlay.imageSrc}
-                    alt="Overlay"
-                    onDragStart={e => e.preventDefault()}
-                    style={{ width: "100%", height: "100%", objectFit: "contain" }} // Scale image
-                  />
-                  {
-                    focussedParentId === overlay.id && <CiTrash onClick={(e) => {
-                      e.stopPropagation()
-                      handleDelete(overlay.id)
-                    }} className='text-2xl absolute -top-5 -right-5' />
-                  }
-                </div>
-              )}
-
-            </Rnd>
-          ))}
-
-          {/* Hidden file input for image upload */}
-          <input
-            type="file"
-            id="image-upload"
-            style={{ display: "none" }}
-            accept="image/*"
-            onChange={(e) => {
-              if (e.target.files && e.target.files[0]) {
-                addImageOverlay(e.target.files[0]);
-              }
-            }}
-          />
-        </div>
-
-        <div className='flex items-center w-full text-white gap-4'>
-          <button className='rounded-md text-white w-auto p-2' onClick={() => setPlayinh(!playing)}>
-            {playing ? <CiPause1 /> : <CiPlay1 />}
-          </button>
-
-          {/* Volume Control */}
-          <div className='flex gap-1'>
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step="0.01"
-              value={volume}
-              onChange={(e) => setVolume(parseFloat(e.target.value))}
+            <ReactPlayer
+              url={steamUrl}
+              playing={playing}    // Play/pause control
+              volume={volume}      // Volume control
+              width="100%"         // Video width
+              height="500px"
             />
-            <label> <CiVolumeHigh /></label>
-          </div>
-          <div className='border justify-self-end flex items-center border-orange-400 border-collapse'>
-            <div className='border-r border-orange-400 p-2 text-orange-400'>Overlays</div>
 
-            <div className='p-2 flex items-center *:underline *:cursor-pointer gap-2'>
-              <button className='' onClick={addTextOverlay}>
-                Add text
-              </button>
-              <button
-                onClick={() => document.getElementById("image-upload").click()}
+            {overLays.length > 0 && overLays.map((overlay) => (
+              <Rnd
+                key={overlay.uuid}
+                bounds="parent"
+                size={{ width: overlay.parameters.width, height: overlay.parameters.height }}
+                position={{ x: overlay.parameters.x, y: overlay.parameters.y }}
+                onDragStop={(e, d) =>
+                  setOverlays(prev =>
+                    prev.map(o => o.uuid === overlay.uuid
+                      ? { ...o, parameters: { ...o.parameters, x: d.x, y: d.y } }
+                      : o
+                    )
+                  )
+                }
+                onResizeStop={(e, direction, ref, delta, position) => {
+                  // Dynamically adjust the width/height based on the rendered text size
+                  const newWidth = ref.offsetWidth;
+                  const newHeight = ref.offsetHeight;
 
+                  setOverlays(prev =>
+                    prev.map(o => o.uuid === overlay.uuid
+                      ? {
+                        ...o,
+                        parameters: {
+                          ...o.parameters,
+                          width: newWidth,
+                          height: newHeight
+                        }
+                      }
+                      : o
+                    )
+                  );
+                }}
               >
-                Add Logo
-              </button>
-              <button className="m-2 p-2 bg-green-500 text-white" onClick={saveChanges}>
-                Save
-              </button>
+                {overlay.type === "TEXT" ? (
+                  <div
+                    tabIndex={0}
+                    onFocus={() => setFocussedParentId(overlay.uuid)}
+                    onBlur={() => setFocussedParentId(null)}
+                    style={{ position: "relative", width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <p
+                      className="text-white focus:outline-none focus:border focus:border-white"
+                      style={{
+                        fontSize: `${(overlay.parameters.width / 100) * 14}px`,
+                        width: "100%",
+                        height: "100%",
+                        margin: 0,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        position: "relative",
+                      }}
+                    >
+                      <input
+                        value={overlay.content || ""}
+                        onChange={(e) =>
+                          setOverlays((prev) =>
+                            prev.map((o) => (o.uuid === overlay.uuid ? { ...o, content: e.target.value } : o))
+                          )
+                        }
+                        className="absolute inset-0 w-full h-full bg-transparent text-transparent focus:outline-none focus:ring-0"
+                      />
+                      {overlay.content}
+                    </p>
+                    {
+                      focussedParentId === overlay.uuid && <CiTrash onClick={(e) => {
+                        e.stopPropagation()
+                        handleDelete(overlay.uuid)
+                      }} className='text-2xl absolute -top-5 -right-5' />
+                    }
+                  </div>
+                ) : (
+                  <div
+                    tabIndex={0}
+                    onFocus={() => setFocussedParentId(overlay.uuid)}
+                    onBlur={() => setFocussedParentId(null)}
+                  >
+                    <img
+
+                      src={overlay.imageSrc}
+                      alt="Overlay"
+                      onDragStart={e => e.preventDefault()}
+                      style={{ width: "100%", height: "100%", objectFit: "contain" }} // Scale image
+                    />
+                    {
+                      focussedParentId === overlay.uuid && <CiTrash onClick={(e) => {
+                        e.stopPropagation()
+                        handleDelete(overlay.uuid)
+                      }} className='text-2xl absolute -top-5 -right-5' />
+                    }
+                  </div>
+                )}
+
+              </Rnd>
+            ))}
+
+            {/* Hidden file input for image upload */}
+            <input
+              type="file"
+              id="image-upload"
+              style={{ display: "none" }}
+              accept="image/*"
+              onChange={(e) => {
+                if (e.target.files && e.target.files[0]) {
+                  addImageOverlay(e.target.files[0]);
+                }
+              }}
+            />
+          </div>
+
+          <div className='flex items-center w-full text-white gap-4'>
+            <button className='rounded-md text-white w-auto p-2' onClick={() => setPlayinh(!playing)}>
+              {playing ? <CiPause1 /> : <CiPlay1 />}
+            </button>
+
+            {/* Volume Control */}
+            <div className='flex gap-1'>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step="0.01"
+                value={volume}
+                onChange={(e) => setVolume(parseFloat(e.target.value))}
+              />
+              <label> <CiVolumeHigh /></label>
+            </div>
+            <div className='border justify-self-end flex items-center border-orange-400 border-collapse'>
+              <div className='border-r border-orange-400 p-2 text-orange-400'>Overlays</div>
+
+              <div className='p-2 flex items-center *:underline *:cursor-pointer gap-2'>
+                <button className='' onClick={addTextOverlay}>
+                  Add text
+                </button>
+                <button
+                  onClick={() => document.getElementById("image-upload").click()}
+
+                >
+                  Add Logo
+                </button>
+                <button className="m-2 p-2 bg-green-500 text-white" onClick={saveChanges}>
+                  Save
+                </button>
+
+              </div>
 
             </div>
-
           </div>
-        </div>
 
-      </div>
+        </div>
+      }
     </div >
   );
 }
