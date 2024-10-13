@@ -50,14 +50,12 @@ cp .env.example .env
 Client Environment Variables (client/.env)
 
     REACT_APP_BACKEND_URL - The URL where the Flask backend is hosted.
-    REACT_APP_API_KEY - If your project requires any API keys for external services.
     
 
 Backend Environment Variables (server/.env)
 
     
     MONGO_URI - The connection string for your MongoDB instance.
-    SECRET_KEY - A secret key for Flask session management.
     FFMPEG_PATH - The path to the ffmpeg binary on your system (if not globally installed).
   
 
